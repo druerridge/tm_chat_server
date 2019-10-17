@@ -18,5 +18,5 @@ Cargo.lock
 #**/*.rs.bk
 
 # intellij project files
-/idea
+/.idea
 *.iml
