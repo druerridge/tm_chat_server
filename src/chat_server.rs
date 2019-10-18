@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use crate::commands::ConnectionCommand;
 use serde_json::Error;
+use std::collections::HashMap;
 
 struct ConnectionListener {
     tcp_listener: TcpListener,
@@ -15,6 +16,7 @@ struct ConnectionListener {
 struct StreamListener {
     unassigned_streams: Vec<TcpStream>,
     unattached_stream_receiver: Receiver<TcpStream>,
+    tcp_streams_by_room_id: HashMap<RoomId, Vec<TcpStream>>,
 }
 
 pub fn run(port: u16) {
@@ -36,6 +38,7 @@ pub fn run(port: u16) {
         let mut stream_listener = StreamListener{
             unassigned_streams: vec![],
             unattached_stream_receiver,
+            tcp_streams_by_room_id: HashMap::new(),
         };
         println!("Stream listener is listening on connected streams...");
         stream_listener.run();
@@ -44,6 +47,8 @@ pub fn run(port: u16) {
     #[allow(clippy::empty_loop)]
     loop {}
 }
+
+type RoomId = String;
 
 impl StreamListener {
     fn run(&mut self) {
@@ -57,18 +62,42 @@ impl StreamListener {
     }
 
     fn listen_unassigned_streams(&mut self) {
-        for tcp_stream in &mut self.unassigned_streams {
+        let mut i = self.unassigned_streams.len();
+        while i > 0 {
+            i -= 1;
+            let tcp_stream = self.unassigned_streams.get_mut(i).expect("index out of bounds");
             let option_message = StreamListener::read(tcp_stream);
-            if let Some(message) = option_message {
-                let result: Result<ConnectionCommand, Error> = serde_json::from_str(message.as_str());
-                match result {
-                    Ok(join_command) => {
-                        println!("Join {0}", join_command.room);
+            if let Some(connection_command) = StreamListener::connection_command_from(option_message) {
+                match self.tcp_streams_by_room_id.get_mut(connection_command.room.as_str()) {
+                    Some(vec) => {
+                        let tcp_stream = self.unassigned_streams.remove(i);
+                        vec.push(tcp_stream);
                     },
-                    Err(e) => eprintln!("error parsing connection string: {0}", e),
+                    None => {
+                        let tcp_stream = self.unassigned_streams.remove(i);
+                        let vec = vec![tcp_stream];
+                        self.tcp_streams_by_room_id.insert(connection_command.room, vec);
+                    }
                 }
             }
         }
+    }
+
+    fn connection_command_from(option_message: Option<String>) -> Option<ConnectionCommand> {
+        if let Some(message) = option_message {
+            let result: Result<ConnectionCommand, Error> = serde_json::from_str(message.as_str());
+            match result {
+                Ok(connection_command) => {
+                    println!("Join {0}", connection_command.room);
+                    return Some(connection_command);
+                }
+                Err(e) => {
+                    eprintln!("error parsing connection string: {0}", e);
+                    return None;
+                },
+            }
+        }
+        None
     }
 
     fn read(tcp_stream: &mut TcpStream) -> Option<String> {
