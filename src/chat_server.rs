@@ -68,17 +68,20 @@ impl StreamListener {
             let tcp_stream = self.unassigned_streams.get_mut(i).expect("index out of bounds");
             let option_message = StreamListener::read(tcp_stream);
             if let Some(connection_command) = StreamListener::connection_command_from(option_message) {
-                match self.tcp_streams_by_room_id.get_mut(connection_command.room.as_str()) {
-                    Some(vec) => {
-                        let tcp_stream = self.unassigned_streams.remove(i);
-                        vec.push(tcp_stream);
-                    },
-                    None => {
-                        let tcp_stream = self.unassigned_streams.remove(i);
-                        let vec = vec![tcp_stream];
-                        self.tcp_streams_by_room_id.insert(connection_command.room, vec);
-                    }
-                }
+                let tcp_stream = self.unassigned_streams.remove(i);
+                self.add_to_room(connection_command.room, tcp_stream)
+            }
+        }
+    }
+
+    fn add_to_room(&mut self, room_id: RoomId, tcp_stream: TcpStream) {
+        match self.tcp_streams_by_room_id.get_mut(room_id.as_str()) {
+            Some(vec) => {
+                vec.push(tcp_stream);
+            },
+            None => {
+                let vec = vec![tcp_stream];
+                self.tcp_streams_by_room_id.insert(room_id, vec);
             }
         }
     }
