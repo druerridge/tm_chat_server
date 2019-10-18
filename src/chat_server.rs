@@ -4,6 +4,9 @@ use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
+use crate::commands::ConnectionCommand;
+use serde_json::Error;
+
 struct ConnectionListener {
     tcp_listener: TcpListener,
     unattached_stream_sender: Sender<TcpStream>,
@@ -55,18 +58,33 @@ impl StreamListener {
 
     fn listen_unassigned_streams(&mut self) {
         for tcp_stream in &mut self.unassigned_streams {
-            let mut message_bytes = [0; 512];
-            tcp_stream.set_read_timeout(Some(Duration::from_millis(10))).unwrap();
-            let num_bytes_read = match tcp_stream.read(&mut message_bytes) {
-                Ok(n) => n,
-                Err(_) => 0,
-            };
-            if num_bytes_read > 0 {
-                let mut in_message = String::from(std::str::from_utf8(&message_bytes).unwrap());
-                in_message.truncate(num_bytes_read);
-                println!("Received: {}", in_message);
+            let option_message = StreamListener::read(tcp_stream);
+            if let Some(message) = option_message {
+                let result: Result<ConnectionCommand, Error> = serde_json::from_str(message.as_str());
+                match result {
+                    Ok(join_command) => {
+                        println!("Join {0}", join_command.room);
+                    },
+                    Err(e) => eprintln!("error parsing connection string: {0}", e),
+                }
             }
         }
+    }
+
+    fn read(tcp_stream: &mut TcpStream) -> Option<String> {
+        let mut message_bytes = [0; 512];
+        tcp_stream.set_read_timeout(Some(Duration::from_millis(10))).unwrap();
+        let num_bytes_read = match tcp_stream.read(&mut message_bytes) {
+            Ok(n) => n,
+            Err(_) => 0,
+        };
+        if num_bytes_read > 0 {
+            let mut message = String::from(std::str::from_utf8(&message_bytes).unwrap());
+            message.truncate(num_bytes_read);
+            println!("Received: {}", message);
+            return Some(message);
+        }
+        None
     }
 
     fn receive_unattached_streams(&mut self) {

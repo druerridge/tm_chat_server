@@ -5,6 +5,7 @@
 mod app;
 mod settings;
 mod chat_server;
+mod commands;
 
 use crate::app::App;
 
