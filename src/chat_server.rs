@@ -4,7 +4,7 @@ use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
-use crate::commands::{ConnectionCommand, Command, SEND_MESSAGE, SWITCH_ROOM, GET_USERS, SendMessageRequest};
+use crate::commands::{ConnectionCommand, Command, SEND_MESSAGE, SWITCH_ROOM, GET_USERS, SendMessageRequest, SendMessageResponse};
 use serde_json::Error;
 use std::collections::HashMap;
 use std::borrow::BorrowMut;
@@ -64,8 +64,13 @@ impl StreamListener {
 
     fn parse_send_message(message: &str, tcp_streams: &mut Vec<TcpStream>) {
         let send_message_result: Result<SendMessageRequest, Error> = serde_json::from_str(message);
-        if let Ok(send_message_command) = send_message_result {
-            StreamListener::write_to_room(send_message_command.message.as_str(), tcp_streams);
+        if let Ok(send_message_request) = send_message_result {
+            let send_message_response: SendMessageResponse = SendMessageResponse{
+                command_type: String::from(SEND_MESSAGE),
+                message: format!("{0}: {1}", "name", send_message_request.message)
+            };
+            let message = serde_json::to_string(&send_message_response).expect("failed to serialize our own struct");
+            StreamListener::write_to_room(message.as_str(), tcp_streams);
         } else {
             eprintln!("Error parsing SendMessage command with content: {0}", message);
         }

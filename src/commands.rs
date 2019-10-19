@@ -14,6 +14,14 @@ pub struct SendMessageRequest {
     pub message: String,
 }
 
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SendMessageResponse {
+    pub command_type: String,
+    pub message: String,
+}
+
 pub const SEND_MESSAGE: &str = "SendMessage";
 pub const GET_USERS: &str = "GetUsers";
 pub const SWITCH_ROOM: &str = "SwitchRoom";
