@@ -24,7 +24,7 @@ impl App {
             .unwrap_or_else(|_| panic!("Unable to read from file at {0}", &settings_path));
         let settings: Settings = serde_json::from_str(json_str.as_str())
             .unwrap_or_else(|_| panic!("Unable to parse malformed json:\n {0}", json_str));
-        println!("port {0}", settings.port);
+        println!("port {0}", settings.socket_server_port);
 
         chat_server::run(settings.port);
 
