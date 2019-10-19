@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
@@ -35,7 +35,7 @@ pub fn run(port: u16) {
     });
 
     thread::spawn(move || {
-        let mut stream_listener = StreamListener{
+        let mut stream_listener = StreamListener {
             unassigned_streams: vec![],
             unattached_stream_receiver,
             tcp_streams_by_room_id: HashMap::new(),
@@ -45,7 +45,7 @@ pub fn run(port: u16) {
     });
 
     #[allow(clippy::empty_loop)]
-    loop {}
+        loop {}
 }
 
 type RoomId = String;
@@ -69,19 +69,28 @@ impl StreamListener {
             let option_message = StreamListener::read(tcp_stream);
             if let Some(connection_command) = StreamListener::connection_command_from(option_message) {
                 let tcp_stream = self.unassigned_streams.remove(i);
-                self.add_to_room(connection_command.room, tcp_stream)
+                self.add_to_room(connection_command, tcp_stream);
             }
         }
     }
 
-    fn add_to_room(&mut self, room_id: RoomId, tcp_stream: TcpStream) {
-        match self.tcp_streams_by_room_id.get_mut(room_id.as_str()) {
+    fn write(tcp_stream: &mut TcpStream, out_message: &str) {
+        println!("Sending: {}", out_message);
+        let _ = tcp_stream.write(out_message.as_bytes()).expect("error writing to tcp stream");
+        tcp_stream.flush().expect("Error flushing tcpstream after write");
+    }
+
+    fn add_to_room(&mut self, connection_command: ConnectionCommand, tcp_stream: TcpStream) {
+        match self.tcp_streams_by_room_id.get_mut(connection_command.room.as_str()) {
             Some(vec) => {
                 vec.push(tcp_stream);
-            },
+                for tcp_stream in vec {
+                    StreamListener::write(tcp_stream, &format!("{0} joined the room", connection_command.name));
+                }
+            }
             None => {
                 let vec = vec![tcp_stream];
-                self.tcp_streams_by_room_id.insert(room_id, vec);
+                self.tcp_streams_by_room_id.insert(connection_command.room, vec);
             }
         }
     }
@@ -97,7 +106,7 @@ impl StreamListener {
                 Err(e) => {
                     eprintln!("error parsing connection string: {0}", e);
                     return None;
-                },
+                }
             }
         }
         None
@@ -122,10 +131,10 @@ impl StreamListener {
     fn receive_unattached_streams(&mut self) {
         let receive_result = self.unattached_stream_receiver.try_recv();
         match receive_result {
-            Ok(tcp_stream) => { self.received_unattached_stream(tcp_stream) },
+            Ok(tcp_stream) => { self.received_unattached_stream(tcp_stream) }
             Err(try_receieve_error) => {
                 match try_receieve_error {
-                    TryRecvError::Empty => {},
+                    TryRecvError::Empty => {}
                     TryRecvError::Disconnected => println!("disconnected from channel"),
                 }
             }
