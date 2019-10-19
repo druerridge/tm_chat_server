@@ -4,9 +4,10 @@ use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
-use crate::commands::ConnectionCommand;
+use crate::commands::{ConnectionCommand, Command, SEND_MESSAGE, SWITCH_ROOM, GET_USERS, SendMessageRequest};
 use serde_json::Error;
 use std::collections::HashMap;
+use std::borrow::BorrowMut;
 
 struct ConnectionListener {
     tcp_listener: TcpListener,
@@ -57,7 +58,47 @@ impl StreamListener {
 
             self.listen_unassigned_streams();
 
-//            self.list_attached_streams();
+            self.listen_assigned_streams();
+        }
+    }
+
+    fn parse_send_message(message: &str, tcp_streams: &mut Vec<TcpStream>) {
+        let send_message_result: Result<SendMessageRequest, Error> = serde_json::from_str(message);
+        if let Ok(send_message_command) = send_message_result {
+            StreamListener::write_to_room(send_message_command.message.as_str(), tcp_streams);
+        } else {
+            eprintln!("Error parsing SendMessage command with content: {0}", message);
+        }
+    }
+
+    fn parse(message: &str, _room_id: &str, tcp_streams: &mut Vec<TcpStream>) {
+        let command_result: Result<Command, Error> = serde_json::from_str(message);
+        if let Ok(command) = command_result {
+            match command.command_type.as_str() {
+                SEND_MESSAGE => StreamListener::parse_send_message(message, tcp_streams),
+                GET_USERS => println!("Received GET_USERS command"),
+                SWITCH_ROOM => println!("Received SWITCH_ROOM command"),
+                _ => eprintln!("Received an unknown command type: {0}", command.command_type),
+            }
+        } else {
+            eprintln!("There was an error parsing a command received on an assigned stream");
+        }
+    }
+
+    fn listen_assigned_streams(&mut self) {
+        for entry in &mut self.tcp_streams_by_room_id {
+            let room_id = entry.0;
+            let tcp_streams: &mut Vec<TcpStream> = entry.1.borrow_mut();
+            let mut messages = vec![];
+            for tcp_stream in &mut tcp_streams.iter_mut() {
+                if let Some(message) = StreamListener::read(tcp_stream) {
+                    messages.push(message);
+                }
+            }
+
+            for message in messages {
+                StreamListener::parse(message.as_str(), room_id, tcp_streams);
+            }
         }
     }
 
@@ -82,16 +123,20 @@ impl StreamListener {
 
     fn add_to_room(&mut self, connection_command: ConnectionCommand, tcp_stream: TcpStream) {
         match self.tcp_streams_by_room_id.get_mut(connection_command.room.as_str()) {
-            Some(vec) => {
-                vec.push(tcp_stream);
-                for tcp_stream in vec {
-                    StreamListener::write(tcp_stream, &format!("{0} joined the room", connection_command.name));
-                }
+            Some(tcp_streams) => {
+                tcp_streams.push(tcp_stream);
+                StreamListener::write_to_room(format!("{0} joined the room", connection_command.name).as_str(), tcp_streams)
             }
             None => {
                 let vec = vec![tcp_stream];
                 self.tcp_streams_by_room_id.insert(connection_command.room, vec);
             }
+        }
+    }
+
+    fn write_to_room(message: &str, vec: &mut Vec<TcpStream>) {
+        for tcp_stream in vec {
+            StreamListener::write(tcp_stream, message);
         }
     }
 
