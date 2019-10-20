@@ -26,7 +26,7 @@ impl App {
             .unwrap_or_else(|_| panic!("Unable to parse malformed json:\n {0}", json_str));
         println!("port {0}", settings.socket_server_port);
 
-        chat_server::run(settings.port);
+        chat_server::run(settings.socket_server_port);
 
         println!("Finished");
     }

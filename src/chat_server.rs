@@ -120,7 +120,8 @@ impl StreamListener {
         }
     }
 
-    fn write(tcp_stream: &mut TcpStream, out_message: &str) {
+    fn write(tcp_stream: &mut TcpStream, in_message: &str) {
+        let out_message = format!("{}\n", in_message); // maestros-ism here for separating messages in the buffer
         println!("Sending: {}", out_message);
         let _ = tcp_stream.write(out_message.as_bytes()).expect("error writing to tcp stream");
         tcp_stream.flush().expect("Error flushing tcpstream after write");
