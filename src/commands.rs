@@ -31,3 +31,24 @@ pub const SWITCH_ROOM: &str = "SwitchRoom";
 pub struct Command {
     pub command_type: String,
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GetUsersRequest {
+    pub command_type: String,
+    pub room: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SwitchRoomRequest {
+    pub command_type: String,
+    pub room: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GetUsersResponse {
+    pub command_type: String,
+    pub users: Vec<String>,
+}

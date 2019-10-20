@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use serde_json::Error;
 
-use crate::commands::{Command, ConnectionCommand, GET_USERS, SEND_MESSAGE, SendMessageRequest, SendMessageResponse, SWITCH_ROOM};
+use crate::commands::{Command, ConnectionCommand, GET_USERS, SEND_MESSAGE, SendMessageRequest, SendMessageResponse, SWITCH_ROOM, SwitchRoomRequest, GetUsersRequest, GetUsersResponse};
 use crate::tm_tcp_stream::TmTcpStream;
 
 struct ConnectionListener {
@@ -64,7 +64,8 @@ impl StreamListener {
         }
     }
 
-    fn parse_send_message(user_name: &str, message: &str, tm_tcp_streams: &mut Vec<TmTcpStream>) {
+    fn parse_send_message(&mut self, user_name: &str, message: &str, room_id: &str) {
+        let tm_tcp_streams = self.tcp_streams_by_room_id.get_mut(room_id).expect("Room disappeared"); // TODO: this is handle-able
         let send_message_result: Result<SendMessageRequest, Error> = serde_json::from_str(message);
         if let Ok(send_message_request) = send_message_result {
             let send_message_response: SendMessageResponse = SendMessageResponse {
@@ -78,38 +79,80 @@ impl StreamListener {
         }
     }
 
-    fn parse(user_name: &str, message: &str, _room_id: &str, tm_tcp_streams: &mut Vec<TmTcpStream>) {
+    fn parse_switch_room(&mut self, user_name: &str, message: &str, room_id: &str) {
+        let switch_room_result: Result<SwitchRoomRequest, Error> = serde_json::from_str(message);
+        match switch_room_result {
+            Ok(switch_room_request) => {
+                let mut option_removed_stream = None;
+                let tm_tcp_streams = self.tcp_streams_by_room_id.get_mut(room_id).expect("Room disappeared"); // TODO: this is handle-able
+                if let Some(index_to_remove) = tm_tcp_streams.iter().position(|e| e.user_name == user_name) {
+                    option_removed_stream = Some(tm_tcp_streams.remove(index_to_remove));
+                }
+
+                if let Some(removed_stream) = option_removed_stream {
+                    if let Some(new_room) = self.tcp_streams_by_room_id.get_mut(switch_room_request.room.as_str()) {
+                        new_room.push(removed_stream);
+                        println!("Switched rooms");
+                    } else {
+                        let new_streams = vec![removed_stream];
+                        self.tcp_streams_by_room_id.insert(switch_room_request.room, new_streams);
+                    }
+                }
+            }
+            Err(e) => eprintln!("Error: {0}\nWhile parsing SwitchRoomRequest from message: {1}", e, message),
+        };
+    }
+
+    fn parse_get_users(&mut self, user_name: &str, message: &str, users_room_id: &str) {
+        let get_users_result: Result<GetUsersRequest, Error> = serde_json::from_str(message);
+        if let Ok(get_users_request) = get_users_result {
+
+            let request_room_id = get_users_request.room;
+            let requested_room = self.tcp_streams_by_room_id.get(request_room_id.as_str()).expect("Room disappeared"); // TODO: this is handle-able
+            let users: Vec<String> = requested_room.iter().map(|tm_tcp_stream| tm_tcp_stream.user_name.clone()).collect();
+            let get_users_response: GetUsersResponse = GetUsersResponse{
+                command_type: String::from(GET_USERS),
+                users,
+            };
+
+            let get_users_response_payload = serde_json::to_string(&get_users_response).expect("How do you fuck this up?");
+            let users_room = self.tcp_streams_by_room_id.get_mut(users_room_id).expect("Couldn't get the users room"); // This seems unlikely?
+            let user_stream = users_room.iter_mut().find(|stream| stream.user_name == user_name).expect("User should still be in his room"); // how would we handle this
+            StreamListener::write(&mut user_stream.tcp_stream, get_users_response_payload.as_str());
+        }
+    }
+
+    fn parse(&mut self, user_name: &str, message: &str, room_id: &str) {
         let command_result: Result<Command, Error> = serde_json::from_str(message);
         match command_result {
             Ok(command) => {
                 match command.command_type.as_str() {
-                    SEND_MESSAGE => StreamListener::parse_send_message(user_name, message, tm_tcp_streams),
-                    GET_USERS => println!("Received GET_USERS command"),
-                    SWITCH_ROOM => println!("Received SWITCH_ROOM command"),
+                    SEND_MESSAGE => self.parse_send_message(user_name, message, room_id),
+                    GET_USERS => self.parse_get_users(user_name, message, room_id),
+                    SWITCH_ROOM => self.parse_switch_room(user_name, message, room_id),
                     _ => eprintln!("Received an unknown command type: {0}", command.command_type),
                 }
-            },
+            }
             Err(e) => {
-                eprintln!("There was an error parsing a command received on an assigned stream: {0}", e);
-
-            },
+                eprintln!("There was an error: {0}\n While parsing message: {1}", e, message);
+            }
         }
     }
 
     fn listen_assigned_streams(&mut self) {
+        let mut to_parse = vec![];
         for entry in &mut self.tcp_streams_by_room_id {
             let room_id = entry.0;
             let tm_tcp_streams: &mut Vec<TmTcpStream> = entry.1.borrow_mut();
-            let mut messages = vec![];
             for tm_tcp_stream in &mut tm_tcp_streams.iter_mut() {
-                if let Some(message) = StreamListener::read(&mut tm_tcp_stream.tcp_stream) {
-                    messages.push( (tm_tcp_stream.user_name.clone(), message));
+                if let Some(inbound_message) = StreamListener::read(&mut tm_tcp_stream.tcp_stream) {
+                    to_parse.push((tm_tcp_stream.user_name.clone(), inbound_message.clone(), room_id.clone()));
                 }
             }
+        }
 
-            for message in messages {
-                StreamListener::parse(message.0.as_str(), message.1.as_str(), room_id, tm_tcp_streams);
-            }
+        for message in to_parse {
+            self.parse(message.0.as_str(), message.1.as_str(), message.2.as_str());
         }
     }
 
